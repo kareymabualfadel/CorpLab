@@ -1,0 +1,66 @@
+title: Kerberoasting - RC4 TGS Request for Service Account
+id: c8e4f2a1-3b5d-6e7f-9a0b-1c2d3e4f5a6b
+status: stable
+description: |
+    Detects Kerberoasting attacks where a user requests a Kerberos service ticket
+    (TGS) using RC4 encryption (etype 0x17) for a service account. Legitimate
+    modern Kerberos clients request AES256 (0x12) or AES128 (0x11). RC4 requests
+    are deliberately chosen by attackers because RC4 hashes crack significantly
+    faster than AES. The filter excludes machine accounts (ending in $) and
+    local/loopback sources.
+    
+    Observed in CorpLab: jsmith@CORP.LOCAL requested RC4 TGS for svc-jenkins
+    (HTTP/jenkins.corp.local) from Linux host 10.10.10.99. TGT and TGS requests
+    occurred 9ms apart confirming automated tooling (impacket-GetUserSPNs).
+references:
+    - https://attack.mitre.org/techniques/T1558/003/
+    - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/t1208-kerberoasting
+    - https://github.com/fortra/impacket
+author: CorpLab SOC
+date: 2026-04-23
+tags:
+    - attack.credential_access
+    - attack.t1558.003
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4769
+        TicketEncryptionType: '0x17'
+    filter_machine_accounts:
+        ServiceName|endswith: '$'
+    filter_local:
+        IpAddress:
+            - '::1'
+            - '127.0.0.1'
+    condition: selection and not filter_machine_accounts and not filter_local
+fields:
+    - TargetUserName
+    - ServiceName
+    - TicketEncryptionType
+    - IpAddress
+    - TargetDomainName
+falsepositives:
+    - Legacy systems that only support RC4 (old Windows Server, some Linux Kerberos clients)
+    - Misconfigured Kerberos clients forcing RC4 downgrade
+    - AES not enabled on target service accounts (fix: set msDS-SupportedEncryptionTypes)
+level: high
+
+---
+# SPL Translation for Splunk
+# Paste directly into Splunk Search
+#
+# index=windows EventCode=4769
+# Ticket_Encryption_Type=0x17
+# | where NOT match(Service_Name, "\\$$")
+# | where NOT match(Client_Address, "^(::1|127\.0\.0\.1)$")
+# | eval mitre="T1558.003 - Kerberoasting"
+# | table _time, Account_Name, Service_Name, Ticket_Encryption_Type, Client_Address, mitre
+# | sort -_time
+#
+# Save as Alert:
+# Title: ALERT - Kerberoasting Detected: RC4 TGS for Service Account (T1558.003)
+# Schedule: Every 15 minutes, Last 15 minutes
+# Trigger: Number of results > 0
+# Severity: Critical
