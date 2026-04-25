@@ -1,0 +1,120 @@
+{
+  "attack_id": "ATK-005",
+  "name": "BloodHound AD Enumeration",
+  "sprint": 1,
+  "date": "2026-04-26",
+  "status": "complete",
+  "mitre": [
+    {
+      "tactic": "Discovery",
+      "technique": "Permission Groups Discovery",
+      "sub_technique": "Domain Groups",
+      "technique_id": "T1069.002"
+    },
+    {
+      "tactic": "Discovery",
+      "technique": "Account Discovery",
+      "sub_technique": "Domain Account",
+      "technique_id": "T1087.002"
+    }
+  ],
+  "tool": "bloodhound-python + BloodHound CE v9.0.0",
+  "attacker": {
+    "host": "kali",
+    "ip": "10.10.10.99",
+    "creds_used": "jsmith:Password123!"
+  },
+  "target": {
+    "domain": "corp.local",
+    "dc": "DC01",
+    "dc_ip": "10.10.10.40"
+  },
+  "collection_stats": {
+    "domains": 1,
+    "computers": 2,
+    "users": 7,
+    "groups": 53,
+    "gpos": 6,
+    "ous": 5,
+    "containers": 19,
+    "trusts": 0,
+    "duration_seconds": 2
+  },
+  "files_generated": [
+    "20260425182935_computers.json",
+    "20260425182935_domains.json",
+    "20260425182935_groups.json",
+    "20260425182935_users.json",
+    "20260425182935_containers.json",
+    "20260425182935_gpos.json",
+    "20260425182935_ous.json"
+  ],
+  "attack_paths_found": [
+    {
+      "path": "JDOE → GenericAll → JSMITH → GetChanges → CORP.LOCAL → DOMAIN ADMINS",
+      "hops": 4,
+      "start": "JDOE@CORP.LOCAL",
+      "end": "DOMAIN ADMINS@CORP.LOCAL",
+      "cypher": "MATCH p=shortestPath((u:User {name:'JDOE@CORP.LOCAL'})-[*1..]->(g:Group {name:'DOMAIN ADMINS@CORP.LOCAL'})) RETURN p"
+    }
+  ],
+  "key_misconfigurations_confirmed": [
+    {"account": "jdoe", "misconfiguration": "dontreqpreauth=true", "attack": "ATK-004"},
+    {"account": "jdoe", "misconfiguration": "GenericAll over jsmith", "attack": "ATK-006 enabler"},
+    {"account": "jsmith", "misconfiguration": "GetChanges on domain object", "attack": "ATK-006"},
+    {"account": "svc-jenkins", "misconfiguration": "Kerberoastable SPN HTTP/jenkins.corp.local", "attack": "ATK-003"},
+    {"account": "DC01$", "misconfiguration": "unconstraineddelegation=true", "attack": "Potential ATK-008"}
+  ],
+  "stages": [
+    {
+      "stage": 1,
+      "name": "bloodhound-python collection",
+      "command": "bloodhound-python -u jsmith -p 'Password123!' -d corp.local -ns 10.10.10.40 -c all",
+      "result": "7 JSON files generated — full domain graph captured in 2 seconds",
+      "detected": false,
+      "gap": "VIS-005"
+    },
+    {
+      "stage": 2,
+      "name": "BloodHound CE ingestion",
+      "tool": "BloodHound CE v9.0.0",
+      "result": "All 7 JSON files ingested successfully",
+      "detected": false
+    },
+    {
+      "stage": 3,
+      "name": "Attack path query",
+      "cypher": "MATCH p=shortestPath((u:User {name:'JDOE@CORP.LOCAL'})-[*1..]->(g:Group {name:'DOMAIN ADMINS@CORP.LOCAL'})) RETURN p",
+      "result": "Complete kill chain: jdoe→GenericAll→jsmith→GetChanges→CORP.LOCAL→Domain Admins",
+      "detected": false,
+      "gap": "VIS-005"
+    }
+  ],
+  "detection_rate": "0/3 (0%)",
+  "visibility_gaps": ["VIS-005", "VIS-007"],
+  "new_gaps": [
+    {
+      "id": "VIS-007",
+      "description": "No detection for BloodHound LDAP enumeration patterns",
+      "fix": "Suricata custom rule — requires VIS-001 fix first (Sprint 4)"
+    }
+  ],
+  "new_findings": [
+    {
+      "finding": "DC01 unconstraineddelegation=true",
+      "impact": "Potential PrinterBug/coercion attack — TGT capture without jsmith ACL",
+      "priority": "backlog — ATK-008"
+    }
+  ],
+  "screenshots": [
+    "bloodhound-jdoe-to-domainadmins.png",
+    "bloodhound-full-domain-paths.png"
+  ],
+  "rag_value": "high",
+  "sprint1_cumulative": {
+    "total_stages": 21,
+    "total_detected": 10,
+    "cumulative_rate": "48%"
+  },
+  "next_attack": "ATK-006 DCSync via jsmith GetChanges rights"
+}

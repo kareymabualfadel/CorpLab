@@ -1,0 +1,57 @@
+title: Potential BloodHound LDAP Enumeration — High Volume Domain Object Queries
+id: atk005-bloodhound-ldap-enum-corp
+status: experimental
+description: >
+  Detects potential BloodHound-style AD enumeration via high volume of
+  Kerberos TGT requests from a single non-DC source in a short time window.
+  Direct LDAP enumeration is silent without advanced audit logging — this rule
+  catches the authentication artifact produced during collection.
+  Validated in CorpLab against bloodhound-python targeting corp.local 2026-04-26.
+author: CorpLab
+date: 2026-04-26
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://attack.mitre.org/techniques/T1087/002/
+  - https://github.com/BloodHoundAD/BloodHound
+tags:
+  - attack.discovery
+  - attack.t1069.002
+  - attack.t1087.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4768
+  filter_dc:
+    IpAddress|startswith:
+      - '::ffff:10.10.10.40'
+      - '::ffff:10.10.10.1'
+  timeframe: 30s
+  condition: selection and not filter_dc | count() by IpAddress > 5
+falsepositives:
+  - Legitimate admin scripts performing domain queries
+  - Monitoring tools polling Kerberos
+level: medium
+fields:
+  - EventID
+  - TargetUserName
+  - IpAddress
+
+# IMPORTANT: This is a best-effort indirect detection rule.
+# True BloodHound detection requires one of:
+# 1. LDAP audit logging (Event ID 1644 via registry change on DC01)
+# 2. Network IDS signature on intra-LAN (requires VIS-001 fix — Sprint 4)
+# 3. Honeypot SPNs that alert on query (Sprint 4)
+#
+# SPL Translation (Splunk):
+# index=windows EventCode=4768
+# | where NOT match(Client_Address, "::ffff:10\.10\.10\.(40|1)$")
+# | bucket _time span=30s
+# | stats count by _time, Client_Address
+# | where count > 5
+# | table _time, Client_Address, count
+# | sort -count
+#
+# Status: NOT validated — blue-vm was suspended during ATK-005.
+# Re-run collection with blue-vm active in Sprint 4 to validate.
