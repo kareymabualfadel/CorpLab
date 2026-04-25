@@ -134,7 +134,8 @@ MATCH p=shortestPath((u:User {name:"JDOE@CORP.LOCAL"})-[*1..]->(g:Group {name:"D
 
 **BloodHound output — attack path graph:**
 
-![BloodHound jdoe to Domain Admins path](bloodhound-jdoe-to-domainadmins.png)
+![BloodHound jdoe to Domain Admins path](<img width="1901" height="809" alt="bloodhound-jdoe-to-domainadmins png" src="https://github.com/user-attachments/assets/70adfde4-e641-432a-aac6-d56bc3d39330" />
+)
 
 *Screenshot: BloodHound CE Cypher query result showing the complete attack path from JDOE@CORP.LOCAL through GenericAll → JSMITH@CORP.LOCAL → GetChanges → CORP.LOCAL domain object → DOMAIN ADMINS@CORP.LOCAL*
 
@@ -145,7 +146,8 @@ MATCH p=shortestPath((u:User)-[*1..]->(g:Group {name:"DOMAIN ADMINS@CORP.LOCAL"}
 
 **BloodHound output — full domain graph:**
 
-![BloodHound full domain attack paths](bloodhound-full-domain-paths.png)
+![BloodHound full domain attack paths](<img width="1465" height="453" alt="bloodhound-full-domain-paths png" src="https://github.com/user-attachments/assets/f633b08c-ae19-4ca6-837c-d6caa4536cec" />
+)
 
 *Screenshot: Full domain graph showing all paths to Domain Admins, including ADMINISTRATOR@CORP.LOCAL MemberOf relationship and the complete jdoe→jsmith→DCSync chain*
 
