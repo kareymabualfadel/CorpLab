@@ -1,0 +1,45 @@
+title: AS-REP Roasting — Kerberos Pre-Authentication Disabled Request
+id: atk004-asrep-roasting-corp
+status: test
+description: >
+  Detects AS-REP roasting attack — a Kerberos AS-REQ where pre-authentication
+  is not required (type 0x0). Indicates account misconfiguration being exploited
+  to obtain an offline-crackable hash without valid credentials for the target account.
+  Validated in CorpLab against impacket-GetNPUsers targeting jdoe on 2026-04-25.
+author: CorpLab
+date: 2026-04-25
+references:
+  - https://attack.mitre.org/techniques/T1558/004/
+  - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/as-rep-roasting-using-rubeus-and-hashcat
+tags:
+  - attack.credential_access
+  - attack.t1558.004
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4768
+    PreAuthType: '0'
+  filter_dc:
+    IpAddress|startswith:
+      - '::ffff:10.10.10.40'
+      - '::ffff:10.10.10.1'
+  condition: selection and not filter_dc
+falsepositives:
+  - Legacy systems that do not support Kerberos pre-authentication
+  - Misconfigured service accounts (should be remediated — not a valid FP)
+level: high
+fields:
+  - EventID
+  - TargetUserName
+  - IpAddress
+  - PreAuthType
+
+# --- SPL Translation (Splunk) ---
+# index=windows EventCode=4768 Pre_Authentication_Type=0
+# | where NOT match(Client_Address, "::ffff:10\.10\.10\.(40|1)$")
+# | table _time, Account_Name, Client_Address, Pre_Authentication_Type
+# | sort -_time
+#
+# Validated: 1 hit on 2026-04-25 19:30:24 — jdoe from ::ffff:10.10.10.99
