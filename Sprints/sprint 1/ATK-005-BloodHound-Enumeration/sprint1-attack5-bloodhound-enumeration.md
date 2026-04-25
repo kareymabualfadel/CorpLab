@@ -134,7 +134,8 @@ MATCH p=shortestPath((u:User {name:"JDOE@CORP.LOCAL"})-[*1..]->(g:Group {name:"D
 
 **BloodHound output — attack path graph:**
 
-![BloodHound jdoe to Domain Admins path](bloodhound-jdoe-to-domainadmins.png)
+![BloodHound jdoe to Domain Admins path](ATK-005-BloodHound-Enumeration
+/bloodhound-jdoe-to-domainadmins.png)
 
 *Screenshot: BloodHound CE Cypher query result showing the complete attack path from JDOE@CORP.LOCAL through GenericAll → JSMITH@CORP.LOCAL → GetChanges → CORP.LOCAL domain object → DOMAIN ADMINS@CORP.LOCAL*
 
@@ -145,7 +146,8 @@ MATCH p=shortestPath((u:User)-[*1..]->(g:Group {name:"DOMAIN ADMINS@CORP.LOCAL"}
 
 **BloodHound output — full domain graph:**
 
-![BloodHound full domain attack paths](bloodhound-full-domain-paths.png)
+![BloodHound full domain attack paths](ATK-005-BloodHound-Enumeration
+/bloodhound-full-domain-paths.png)
 
 *Screenshot: Full domain graph showing all paths to Domain Admins, including ADMINISTRATOR@CORP.LOCAL MemberOf relationship and the complete jdoe→jsmith→DCSync chain*
 
