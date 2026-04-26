@@ -1,0 +1,52 @@
+title: DCSync Attack via Non-DC Account
+id: dcsync-non-dc-account-corp
+status: experimental
+description: >
+  Detects DCSync replication requests (GetChanges / GetChangesAll GUIDs on domain object)
+  initiated by a non-Domain Controller account. Legitimate replication only occurs between
+  DC machine accounts (ending in $). Any user account triggering EC4662 with these GUIDs
+  is performing DCSync. Fires on both successful and denied attempts.
+references:
+  - https://attack.mitre.org/techniques/T1003/006/
+  - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4662
+author: CorpLab Blue Team
+date: 2026-04-26
+tags:
+  - attack.credential_access
+  - attack.t1003.006
+  - attack.defense_evasion
+  - attack.t1078.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4662
+  filter_guids:
+    Properties|contains:
+      - '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+      - '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2'
+  filter_dc_accounts:
+    SubjectUserName|endswith: '$'
+  condition: selection and filter_guids and not filter_dc_accounts
+falsepositives:
+  - Legitimate AD replication tools run under user context (extremely rare)
+  - Azure AD Connect sync account — add to allowlist if present in environment
+  - Microsoft Entra Connect service account
+level: critical
+fields:
+  - SubjectUserName
+  - ObjectName
+  - Properties
+  - IpAddress
+
+# SPL translation for Splunk:
+# index=windows EventCode=4662
+# | search _raw="*1131f6aa*" OR _raw="*1131f6ad*"
+# | where NOT match(Account_Name, "\$$")
+# | stats count by Account_Name, host
+# | where count >= 2
+#
+# Lab-confirmed: fires on denied AND successful DCSync attempts
+# Observed: 4 events on denial (03:47:26), 28 events on success (03:50:38)
+# Account: jsmith | Source: 10.10.10.99 (Kali)
