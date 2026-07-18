@@ -5,6 +5,7 @@
 
 ---
 
+
 ## 📌 Overview
 
 CorpLab simulates a realistic corporate SOC environment — complete with Active Directory, segmented VLANs, a CI/CD pipeline, a production web application, a full Splunk SIEM stack, and a Kali Linux attacker. Every component is intentionally misconfigured with real-world vulnerabilities, then attacked from Kali, detected in Splunk, documented as structured data, and eventually hardened.
